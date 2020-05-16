@@ -4,13 +4,20 @@ import androidx.core.app.ActivityCompat;
 import androidx.fragment.app.FragmentActivity;
 
 import android.Manifest;
+import android.animation.Animator;
 import android.annotation.SuppressLint;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.location.Location;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
 
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationCallback;
@@ -29,7 +36,17 @@ import com.google.android.gms.maps.model.MarkerOptions;
 import com.google.android.gms.maps.model.PolylineOptions;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,6 +60,16 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     Marker gpsMarker = null;
     List<Marker> markerList;
 
+    private final String MAPS_JSON_FILE = "maps.json";
+
+    private boolean accelerate = false;
+    private FloatingActionButton fabo = null;
+    private FloatingActionButton fabx = null;
+    private TextView acceleration = null;
+    private SensorManager sensorManager = null;
+    private Button clearMemory = null;
+    List<LatLng> parametersList;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -55,6 +82,66 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
 
         markerList = new ArrayList<>();
+        parametersList = new ArrayList<>();
+
+        fabo = (FloatingActionButton) findViewById(R.id.fabo);
+        fabx = (FloatingActionButton) findViewById(R.id.fabx);
+        acceleration = (TextView) findViewById(R.id.acceleration_view);
+        fabo.setVisibility(View.INVISIBLE);
+        fabx.setVisibility(View.INVISIBLE);
+        acceleration.setVisibility(View.INVISIBLE);
+        sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
+        clearMemory = (Button) findViewById(R.id.clear_memory_button);
+
+        fabo.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view){
+                if(!accelerate)
+                    accelerate = true;
+                else accelerate = false;
+            }
+        });
+
+        fabx.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view){
+                hide(fabo);
+                hide(fabx);
+                hide(acceleration);
+            }
+        });
+
+        sensorManager.registerListener(new SensorEventListener() {
+            @Override
+            public void onSensorChanged(SensorEvent event) {
+                if(acceleration != null && accelerate){
+                    acceleration.setText(String.format("Acceleration:\n x: %.5f, y: %.5f", event.values[0], event.values[1]));
+                }
+            }
+
+            @Override
+            public void onAccuracyChanged(Sensor sensor, int accuracy) {
+
+            }
+        }, sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), SensorManager.SENSOR_DELAY_FASTEST);
+
+        clearMemory.setOnClickListener(new View.OnClickListener(){
+            @Override
+            public void onClick(View view){
+                for(Marker i: markerList){
+                    i.remove();
+                }
+                markerList.clear();
+                parametersList.clear();
+                mMap.moveCamera(CameraUpdateFactory.zoomTo(0f));
+
+                if(fabo != null && fabx != null && acceleration != null){
+                    hide(fabo);
+                    hide(fabx);
+                    hide(acceleration);
+                }
+            }
+        });
     }
 
 
@@ -73,6 +160,9 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         mMap.setOnMapLoadedCallback(this);
         mMap.setOnMarkerClickListener(this);
         mMap.setOnMapLongClickListener(this);
+        mMap.getUiSettings().setMapToolbarEnabled(false);
+
+        restoreFromJson();
     }
 
     @Override
@@ -103,36 +193,24 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     @Override
     public void onMapLongClick(LatLng latLng) {
-        float distance = 0f;
+        LatLng posXY = new LatLng(latLng.latitude, latLng.longitude);
 
-        if(markerList.size() > 0){
-            Marker lastMarker = markerList.get(markerList.size() - 1);
-            float [] tmpDis = new float[3];
-
-            Location.distanceBetween(lastMarker.getPosition().latitude, lastMarker.getPosition().longitude, latLng.latitude, latLng.longitude, tmpDis);
-            distance = tmpDis[0];
-
-            PolylineOptions rectOptions = new PolylineOptions()
-                    .add(lastMarker.getPosition())
-                    .add(latLng)
-                    .width(10)
-                    .color(Color.BLUE);
-            mMap.addPolyline(rectOptions);
-        }
-
-        @SuppressLint("DefaultLocale") Marker marker = mMap.addMarker(new MarkerOptions()
-                .position(new LatLng(latLng.latitude, latLng.longitude))
-                .icon(BitmapDescriptorFactory.fromResource(R.drawable.marker2))
+        Marker marker = mMap.addMarker(new MarkerOptions()
+                .position(posXY)
+                .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
                 .alpha(0.8f)
-                .title(String.format("Position: (%.2f, %.2f) Distance:%.2f", latLng.latitude, latLng.longitude, distance)));
+                .title(String.format("Position: (%.2f, %.2f)", latLng.latitude, latLng.longitude)));
         markerList.add(marker);
+        parametersList.add(posXY);
     }
 
     @Override
     public boolean onMarkerClick(Marker marker) {
-        CameraPosition cameraPos = mMap.getCameraPosition();
-        if(cameraPos.zoom < 14f)
-            mMap.moveCamera(CameraUpdateFactory.zoomTo(14f));
+        if(fabo != null && fabx !=null && acceleration != null){
+            show(fabo);
+            show(fabx);
+            show(acceleration);
+        }
         return false;
     }
 
@@ -158,7 +236,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     Location location = locationResult.getLastLocation();
                     gpsMarker = mMap.addMarker(new MarkerOptions()
                     .position(new LatLng(location.getLatitude(), location.getLongitude()))
-                    .icon(BitmapDescriptorFactory.fromResource(R.drawable.marker))
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
                     .alpha(0.8f)
                     .title("Current location"));
                 }
@@ -183,5 +261,125 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     public void zoomOutClick(View v){
         mMap.moveCamera(CameraUpdateFactory.zoomOut());
+    }
+
+    private void saveMapsToJson(List<LatLng> markers){
+        Gson gson = new Gson();
+        String listJson = gson.toJson(markers);
+        FileOutputStream outputStream;
+        try{
+            outputStream = openFileOutput(MAPS_JSON_FILE, MODE_PRIVATE);
+            FileWriter writer = new FileWriter(outputStream.getFD());
+            writer.write(listJson);
+            writer.close();
+            Log.v("saving", "File saved");
+        } catch (FileNotFoundException e){
+            e.printStackTrace();
+            Log.v("saving", "File not saved - not found file");
+        } catch (IOException e){
+            e.printStackTrace();
+        }
+    }
+
+    public void restoreFromJson(){
+        FileInputStream inputStream;
+        int DEFAULT_BUFFER_SIZE = 10000;
+        Gson gson = new Gson();
+        String readJson;
+
+        try{
+            inputStream = openFileInput(MAPS_JSON_FILE);
+            FileReader reader = new FileReader(inputStream.getFD());
+            char[] buf = new char[DEFAULT_BUFFER_SIZE];
+            int n;
+            StringBuilder builder = new StringBuilder();
+            while((n = reader.read(buf)) >= 0){
+                String tmp = String.valueOf(buf);
+                String substring = (n<DEFAULT_BUFFER_SIZE) ? tmp.substring(0, n) : tmp;
+                builder.append(substring);
+            }
+            reader.close();
+            readJson = builder.toString();
+            Type collectionType = new TypeToken<List<LatLng>>(){}.getType();
+            List<LatLng> o = gson.fromJson(readJson, collectionType);
+            if(o != null){
+                markerList.clear();
+                parametersList.clear();
+
+                for(LatLng i: o){
+                    LatLng latLng = new LatLng(i.latitude, i.longitude);
+                    MarkerOptions markerOptions = new MarkerOptions()
+                            .position(latLng)
+                            .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED))
+                            .alpha(0.8f)
+                            .title("Restored marker");
+                    try{
+                        markerList.add(mMap.addMarker(markerOptions));
+                        parametersList.add(latLng);
+                    } catch (Exception e){
+                        Log.e("loading", e.getMessage());
+                    }
+                }
+            } else{
+                Log.v("loading", "Empty file");
+            }
+        } catch(FileNotFoundException e){
+            e.printStackTrace();
+        } catch(IOException e){
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    protected void onDestroy(){
+        saveMapsToJson(parametersList);
+        super.onDestroy();
+    }
+
+    public void show(final View view){
+        view.animate().translationY(0).alpha(1f).setDuration(250).setListener(new Animator.AnimatorListener(){
+            @Override
+            public void onAnimationStart(Animator animation) {
+                view.setVisibility(View.VISIBLE);
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+
+            }
+
+            @Override
+            public void onAnimationRepeat(Animator animation) {
+
+            }
+        });
+    }
+
+    public void hide(final View view){
+        view.animate().translationY(0).alpha(0f).setDuration(250).setListener(new Animator.AnimatorListener() {
+            @Override
+            public void onAnimationStart(Animator animation) {
+
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                view.setVisibility(View.INVISIBLE);
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+
+            }
+
+            @Override
+            public void onAnimationRepeat(Animator animation) {
+
+            }
+        });
     }
 }

@@ -1,5 +1,7 @@
 <resources>
-    <string name="app_name">lab7</string>
-    <string name="title_activity_maps">Map</string>
+    <string name="app_name">DC HW2</string>
+    <string name="title_activity_maps">DC HW2</string>
     <string name="last_known_loc_msg">LAST KNOWN LOC</string>
+    <string name="clear_memory">CLEAR MEMORY</string>
+    <string name="acceleration">Acceleration:</string>
 </resources>
